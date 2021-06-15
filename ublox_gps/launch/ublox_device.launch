@@ -12,12 +12,24 @@
   <arg name="respawn_delay"       default="30" />
   <arg name="clear_params"        default="true" />
 
+
+  <!-- NTRIP host configuration -->
+  <arg name="user"        default="synkar" />
+  <arg name="password"    default="snk@0912" />
+  <arg name="host"        default="170.84.40.52" />
+  <arg name="port"        default="2101" />
+  <arg name="mountpoint"  default="SPJA0" />
+  <arg name="device"      default="ttyACM0" />
+  <arg name="baudrate"    default="38400" />
+  
   <node pkg="ublox_gps" type="ublox_gps" name="$(arg node_name)"
         output="$(arg output)"
         clear_params="$(arg clear_params)"
         respawn="$(arg respawn)"
-        respawn_delay="$(arg respawn_delay)">
+        respawn_delay="$(arg respawn_delay)"
+        launch-prefix="bash -c 'str2str -in ntrip://$(arg user):$(arg password)@$(arg host):$(arg port)/$(arg mountpoint) -out serial://$(arg device):$(arg baudrate) &#038; $0 $@'">
     <rosparam command="load"
               file="$(arg param_file_dir)/$(arg param_file_name).yaml" />
   </node>
+
 </launch>
