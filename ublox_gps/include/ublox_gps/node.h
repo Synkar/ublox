@@ -31,19 +31,21 @@
 #define UBLOX_GPS_NODE_H
 
 // STL
-#include <vector>
 #include <set>
+#include <vector>
 // Boost
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/regex.hpp>
 // ROS includes
-#include <ros/ros.h>
-#include <ros/console.h>
-#include <ros/serialization.h>
 #include <tf/transform_datatypes.h>
 #include <diagnostic_updater/diagnostic_updater.h>
 #include <diagnostic_updater/publisher.h>
+#include <ros/console.h>
+#include <ros/ros.h>
+#include <ros/serialization.h>
+#include <std_msgs/Bool.h>
+#include <std_msgs/Int8.h>
 // ROS messages
 #include <geometry_msgs/TwistWithCovarianceStamped.h>
 #include <geometry_msgs/Vector3Stamped.h>
@@ -588,6 +590,11 @@ class UbloxNode : public virtual ComponentInterface {
    */
   void configureInf();
 
+  void coldResetCb(const std_msgs::Int8::ConstPtr &msg);
+  void configureAgpsCb(const std_msgs::Bool::ConstPtr &msg);
+  ros::Subscriber coldResetSub;
+  ros::Subscriber configureAgpsSub;
+
   //! The u-blox node components
   /*!
    * The node will call the functions in these interfaces for each object
@@ -643,6 +650,8 @@ class UbloxNode : public virtual ComponentInterface {
   ublox_msgs::CfgCFG load_;
   //! Parameters to save to non-volatile memory after configuration
   ublox_msgs::CfgCFG save_;
+  //! Enabling the AssitNow gps online
+  bool enable_agps_;
   //! rate for TIM-TM2
   uint8_t tim_rate_;
 
@@ -938,6 +947,12 @@ class UbloxFirmware7Plus : public UbloxFirmware {
   bool enable_sbas_;
   //! The QZSS Signal configuration, see CfgGNSS message
   uint32_t qzss_sig_cfg_;
+  //AGPS path to store the ubx config file
+  std::string agps_path_;
+  //AGPS token to request the ubx config file
+  std::string agps_token_;
+   //! Enabling the AssitNow gps online
+  bool enable_agps_;
 };
 
 /**

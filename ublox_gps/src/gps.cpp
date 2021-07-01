@@ -27,8 +27,8 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //==============================================================================
 
-#include <ublox_gps/gps.h>
 #include <boost/version.hpp>
+#include <ublox_gps/gps.h>
 
 namespace ublox_gps {
 
@@ -46,6 +46,24 @@ Gps::Gps() : configured_(false), config_on_startup_flag_(true) {
 }
 
 Gps::~Gps() { close(); }
+
+void Gps::setAgpsParams(std::string apgs_path_, std::string apgs_options_, std::string token_){
+  token=token_;
+  std::string agps_filename(AGPS_FILE);
+  std::string agps_filename_temp(AGPS_FILE_TEMP);
+  std::string apgs_wget_filename(AGPS_WGET_LOG);
+  std::string apgs_options_init(AGPS_OPTIONS_INIT);
+  std::string apgs_options_end(AGPS_OPTIONS_END);
+
+  agps_path=getenv("GPS_PATH")!=NULL?getenv("GPS_PATH"):apgs_path_; //agps_path could be configured also using an environment variable
+  log_=agps_path+apgs_wget_filename;
+  agps_path_temp=agps_path+agps_filename_temp;  
+  agps_path=agps_path+agps_filename;
+
+  options= apgs_options_init + apgs_options_ + apgs_options_end; 
+
+  ROS_INFO("AGPS path %s & path temp %s log_ %s",agps_path.c_str(),agps_path_temp.c_str(),log_.c_str());
+}
 
 void Gps::setWorker(const boost::shared_ptr<Worker>& worker) {
   if (worker_) return;
@@ -65,6 +83,15 @@ void Gps::subscribeAcks() {
   // Set UPD-SOS-ACK handler
   subscribe<ublox_msgs::UpdSOS_Ack>(
       boost::bind(&Gps::processUpdSosAck, this, _1));
+
+  // Set UBX-MGA-ACK-DATA0 handler
+  subscribeId<ublox_msgs::MgaACK>(boost::bind(&Gps::processMgaAck, this, _1),
+                                  ublox_msgs::Message::MGA::ACK);
+
+  // Set UBX-MGA-ACK-DATA0 handler
+  subscribeId<ublox_msgs::CfgNAVX5>(
+      boost::bind(&Gps::processGetNAVX5, this, _1),
+      ublox_msgs::Message::CFG::NAVX5);
 }
 
 void Gps::processAck(const ublox_msgs::Ack &m) {
@@ -90,6 +117,35 @@ void Gps::processNack(const ublox_msgs::Ack &m) {
   ROS_ERROR("U-blox: received NACK: 0x%02x / 0x%02x", m.clsID, m.msgID);
 }
 
+void Gps::processMgaAck(const ublox_msgs::MgaACK &m) {
+  if (m.type == MgaACK::ACK_OK) {
+    ROS_DEBUG_COND(debug>=2 || m.msgId==64 ,"MgaACK %d", m.msgId);
+  } else {
+    std::string infoCode;
+    switch (m.infoCode) {
+    case 1:
+      infoCode = MgaACK::INFO_CODE1;
+      break;
+    case 2:
+      infoCode = MgaACK::INFO_CODE2;
+      break;
+    case 3:
+      infoCode = MgaACK::INFO_CODE3;
+      break;
+    case 4:
+      infoCode = MgaACK::INFO_CODE4;
+      break;
+    case 5:
+      infoCode = MgaACK::INFO_CODE5;
+      break;
+    case 6:
+      infoCode = MgaACK::INFO_CODE6;
+      break;
+    }
+    ROS_WARN("MgaACK fail infoCode: %s", infoCode.c_str());
+  }
+}
+  
 void Gps::processUpdSosAck(const ublox_msgs::UpdSOS_Ack &m) {
   if (m.cmd == UpdSOS_Ack::CMD_BACKUP_CREATE_ACK) {
     Ack ack;
@@ -279,6 +335,17 @@ bool Gps::configReset(uint16_t nav_bbr_mask, uint16_t reset_mode) {
   // Don't wait for ACK, return if it fails
   if (!configure(rst, false))
     return false;
+  return true;
+}
+
+bool Gps::coldReset(const boost::posix_time::time_duration &wait) {
+  // Cold reset the GNSS
+  ROS_WARN("GNSS re-configured, cold resetting device.");
+  if (!configReset(CfgRST::NAV_BBR_COLD_START, CfgRST::RESET_MODE_GNSS))
+    return false;
+  ros::Duration(1.0).sleep();
+  // Reset the I/O
+  reset(wait);
   return true;
 }
 
@@ -509,8 +576,9 @@ bool Gps::setPpp(bool enable, float protocol_version) {
   msg.usePPP = enable;
   if(protocol_version >= 18)
     msg.version = 2;
-  msg.mask1 = ublox_msgs::CfgNAVX5::MASK1_PPP;
-  return configure(msg);
+  msg.mask1 = ublox_msgs::CfgNAVX5::MASK1_PPP | ublox_msgs::CfgNAVX5::MASK1_ACK_AID;
+  msg.ackAiding = 1;
+  return configure(msg, true);
 }
 
 bool Gps::setDgnss(uint8_t mode) {
@@ -587,4 +655,166 @@ bool Gps::setTimtm2(uint8_t rate) {
   msg.rate  = rate; 
   return configure(msg);
 }
+
+bool Gps::downloadAGPS() {
+  std::string url(AGPS_URL);
+  std::string url_ = url + token + options;
+  std::string command =
+      "wget -O " + agps_path_temp + " -o " + log_ + " \"" + url_ + "\"";
+  ROS_INFO("downloading AGPS... %s", command.c_str());
+  executeShellCommand(command);
+
+  if (fileSuccess()) {
+    command = "mv " + agps_path_temp + " " + agps_path; // Update ublox file
+    executeShellCommand(command);
+    return true;
+  }
+  // Cleaning temp file
+  command = "rm " + agps_path_temp;
+  executeShellCommand(command);
+  return false;
+}
+
+bool Gps::fileSuccess() {
+  ROS_INFO("checking file success");
+  std::string line;
+  std::ifstream logFile(log_, std::ifstream::in);
+  int successLine = 0;
+  if (logFile.is_open()) {
+    while (logFile.good()) {
+      getline(logFile, line);
+      successLine++;
+      // ROS_INFO("line %d %s", successLine, line.c_str());
+      if (successLine == 4)
+        return line.compare(AGPS_SERVER_202) == 0;
+    }
+    logFile.close();
+  } else
+    ROS_WARN("Unable to open wget logfile");
+
+  ROS_ERROR("agps file download error");
+  return false;
+}
+
+bool Gps::checkAGPSFile() {
+  struct stat result;
+  if ((stat(agps_path.c_str(), &result) == 0)) {
+    int modified = (long)result.st_mtime;
+    double time_modification =
+        (double)(ros::Time::now().toSec() - modified) / 60; // Minutes
+    ROS_INFO("checkAGPSFile last %0.4f", time_modification);
+    if (time_modification > 60)
+      return downloadAGPS();
+    else {
+      ROS_DEBUG_STREAM("File is still valid");
+      return true;
+    }
+  } else
+    return downloadAGPS();
+}
+
+void Gps::configureAGPS() {
+  if (checkAGPSFile()) {
+    // Create a MGA_INI_TIME_UTC
+    coldReset(boost::posix_time::seconds(1));
+    ublox_msgs::MgaINITIMEUTC mga_time = getMgaUtc();
+    ROS_DEBUG("configuringAGPS");
+    configure(mga_time);
+    // Get the rest of the file
+     std::ifstream ubxFile(agps_path, std::ios::binary);
+     std::vector<char> buffer((std::istreambuf_iterator<char>(ubxFile)),
+                              (std::istreambuf_iterator<char>()));
+
+     int size = buffer.size() - AGPS_TIME_SIZE;
+     std::vector<unsigned char> apgsData(size);
+
+     for (int i = 0; i < buffer.size(); i++) {
+       if (i >= AGPS_TIME_SIZE)
+         apgsData[i - AGPS_TIME_SIZE] = buffer[i];
+     }
+     worker_->send(apgsData.data(), size);
+  }
+}
+
+std::vector<std::string> Gps::split(std::string *s, char delimiter) {
+  size_t pos = 0;
+
+  std::vector<std::string> resp;
+  while ((pos = s->find(delimiter)) != std::string::npos) {
+    resp.push_back(s->substr(0, pos));
+    s->erase(0, pos + 1);
+  }
+  return resp;
+}
+
+void Gps::processGetNAVX5(const ublox_msgs::CfgNAVX5 &m) {
+  ROS_WARN("processGetNAVX5 ackAiding %d", m.ackAiding);
+}
+
+bool Gps::getNAVX5() {
+  ROS_DEBUG("getNAVX5");
+  ublox_msgs::CfgNAVX5_GET msg;
+  return configure(msg, true);
+}
+
+ublox_msgs::MgaINITIMEUTC Gps::getMgaUtc() {
+  ublox_msgs::MgaINITIMEUTC mga_time;
+  mga_time.type = 0x10; // Message type (0x10 for this type)
+  mga_time.version = 0; // Message version (0x00 for this version)
+  mga_time.leapSecs =
+      0x80; // Number of leap seconds since 1980 (or 0x80 =-128 if unknown)
+  boost::posix_time::ptime now_posix_time = ros::Time::now().toBoost();
+  std::string iso_time_str =
+      boost::posix_time::to_iso_extended_string(now_posix_time);
+
+  std::string iso_time_str_line = iso_time_str + "-";
+  std::string iso_time_str_dot = iso_time_str + ".";
+  std::vector<std::string> date = split(&iso_time_str_line, '-');
+  std::vector<std::string> date2 = split(&date[2], 'T');
+  std::vector<std::string> date3 = split(&date[2], ':');
+  std::vector<std::string> date4 = split(&iso_time_str_dot, '.');
+  std::string date4_dot = date4[0] + ":";
+  std::vector<std::string> date5 = split(&date4_dot, ':');
+
+  mga_time.year = std::stoi(date[0], 0, 10);    // Year
+  mga_time.month = std::stoi(date[1], 0, 10);   // Month, starting at 1
+  mga_time.day = std::stoi(date2[0], 0, 10);    // Day, starting at 1
+  mga_time.hour = std::stoi(date3[0], 0, 10);   // Hour, from 0 to 23
+  mga_time.minute = std::stoi(date5[1], 0, 10); // Minute, from 0 to 59
+  mga_time.second = std::stoi(date5[2], 0, 10); // Seconds, from 0 to 59
+  mga_time.reserved1 = 0;                       // reserved1
+  mga_time.ns =
+      std::stoi(date4[1], 0, 10) * 1000; // Nanoseconds, from 0 to 999,999,999
+  mga_time.tAccS = 0;                    // Seconds part of time accuracy
+  mga_time.reserved2 = {0, 0};           // reserved2
+  mga_time.tAccNs =
+      0; // Nanoseconds part of time accuracy, from 0 to 999,999,999
+
+  return mga_time;
+}
+
+std::string Gps::executeShellCommand(std::string command) {
+
+  std::array<char, 1024> buffer;
+  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), pclose);
+  std::string out = "";
+
+  if (!pipe) {
+    throw std::runtime_error("popen() failed!");
+  }
+
+  while (!feof(pipe.get())) {
+
+    if (fgets(buffer.data(), 1024, pipe.get()) != NULL) {
+      out += buffer.data();
+    }
+  }
+
+  if (out.compare("") != 0) {
+    out = out.substr(0, out.size() - 1);
+  }
+
+  return out;
+}
+
 }  // namespace ublox_gps
