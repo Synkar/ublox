@@ -482,6 +482,10 @@ bool UbloxNode::configureUblox() {
       if(!gps.configure(save_))
         ROS_ERROR("u-blox unable to save configuration to non-volatile memory");
     }
+    nh->param("agps/enable", enable_agps_, false);
+    if(enable_agps_)
+     gps.configureAGPS();
+
   } catch (std::exception& e) {
     ROS_FATAL("Error configuring u-blox: %s", e.what());
     return false;
@@ -548,6 +552,19 @@ void UbloxNode::initializeIo() {
   }
 }
 
+void UbloxNode::coldResetCb(const std_msgs::Int8::ConstPtr &msg) {
+  ROS_WARN("coldResetCb");
+  gps.coldReset(boost::posix_time::seconds(msg->data));
+}
+
+void UbloxNode::configureAgpsCb(const std_msgs::Bool::ConstPtr &msg) {
+  ROS_WARN("configureAgpsCb");
+  if(enable_agps_)
+    gps.configureAGPS();
+  else 
+    ROS_WARN("AGPS is not enabled");
+}
+
 void UbloxNode::initialize() {
   // Params must be set before initializing IO
   getRosParams();
@@ -563,6 +580,10 @@ void UbloxNode::initialize() {
     components_[i]->getRosParams();
   // Do this last
   initializeRosDiagnostics();
+  coldResetSub = nh->subscribe<std_msgs::Int8>("coldReset", 10,
+                                               &UbloxNode::coldResetCb, this);
+  configureAgpsSub = nh->subscribe<std_msgs::Bool>(
+      "configureAgps", 10, &UbloxNode::configureAgpsCb, this);
 
   if (configureUblox()) {
     ROS_INFO("U-Blox configured successfully.");
@@ -1109,6 +1130,30 @@ void UbloxFirmware8::getRosParams() {
     cfg_nmea_.bdsTalkerId[0] = bdsTalkerId[0];
     cfg_nmea_.bdsTalkerId[1] = bdsTalkerId[1];
   }
+
+  // AGPS parameters
+  nh->param("agps/enable", enable_agps_, false);
+  nh->param("agps/token", agps_token_, std::string("noToken"));
+  nh->param("agps/path", agps_path_, std::string("/data"));
+
+  std::string agps_options="";
+  agps_options=enable_gps_ ? "gps," : "";
+  agps_options=agps_options+(enable_galileo_ ? "gal," : "");
+  agps_options=agps_options+(enable_beidou_ ? "bds," : "");
+  agps_options=agps_options+(enable_glonass_ ? "glo," : "");
+  agps_options=agps_options+(enable_qzss_ ? "qzss," : "");
+  enable_agps_= enable_agps_ & agps_token_.compare("noToken")!= 0 & agps_options.compare("")!=0;
+
+  if(enable_agps_){
+    agps_options=agps_options.substr(0,agps_options.size()-1);
+    gps.setAgpsParams(agps_path_, agps_options, agps_token_);
+    nh->setParam("agps/enable", true);
+    ROS_WARN("Warning: AGPS is enabled - with file path %s and token %s - this is an expert setting.", agps_path_.c_str(), agps_token_.c_str());
+  }
+  else if(agps_token_.compare("noToken") == 0){
+    ROS_WARN("Warning: AGPS not enabled, configuration error");
+    nh->setParam("agps/enable", false);
+  }
 }
 
 
@@ -1192,7 +1237,7 @@ bool UbloxFirmware8::configureUblox() {
   // since this requires a cold reset
   if (correct)
     ROS_DEBUG("U-Blox GNSS configuration is correct. GNSS not re-configured.");
-  else if (!gps.configGnss(cfg_gnss, boost::posix_time::seconds(15)))
+  else if (!gps.configGnss(cfg_gnss, boost::posix_time::seconds(2))) // changed from 15 to 2
     throw std::runtime_error(std::string("Failed to cold reset device ") +
                              "after configuring GNSS");
 
