@@ -139,6 +139,8 @@ DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::CFG, ublox_msgs::Message::CFG::NAV5,
                       ublox_msgs, CfgNAV5);
 DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::CFG, ublox_msgs::Message::CFG::NAVX5, 
                       ublox_msgs, CfgNAVX5);
+DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::CFG, ublox_msgs::Message::CFG::NAVX5_GET,
+                      ublox_msgs, CfgNAVX5_GET);
 DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::CFG, ublox_msgs::Message::CFG::NMEA, 
                       ublox_msgs, CfgNMEA);
 DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::CFG, ublox_msgs::Message::CFG::NMEA, 
@@ -187,9 +189,13 @@ DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::ESF, ublox_msgs::Message::ESF::RAW,
 DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::ESF, ublox_msgs::Message::ESF::STATUS, 
                       ublox_msgs, EsfSTATUS);
 
-
 DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::MGA, ublox_msgs::Message::MGA::GAL, 
                       ublox_msgs, MgaGAL);
+DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::MGA, ublox_msgs::Message::MGA::ACK,
+                      ublox_msgs, MgaACK);
+DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::MGA,
+                      ublox_msgs::Message::MGA::INITIMEUTC, ublox_msgs,
+                      MgaINITIMEUTC);
 
 DECLARE_UBLOX_MESSAGE(ublox_msgs::Class::HNR, ublox_msgs::Message::HNR::PVT, 
                       ublox_msgs, HnrPVT);
