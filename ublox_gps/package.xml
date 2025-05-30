@@ -14,6 +14,7 @@
 
   <buildtool_depend>catkin</buildtool_depend>
 
+  <depend>custom-wget-pip</depend>
   <depend>ublox_serialization</depend>
   <depend>ublox_msgs</depend>
   <depend>roscpp</depend>
